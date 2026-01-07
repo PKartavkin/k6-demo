@@ -3,7 +3,7 @@ FROM grafana/k6:latest
 WORKDIR /app
 
 # Copy test script
-COPY script.js .
+COPY script.js script.js
 
 # Run test and exit (prevents continuous restart on Railway)
 # This ensures the container shuts down after test completion
