@@ -95,6 +95,9 @@ All endpoints require Basic Authentication.
 - `POST /notes` - Create a new note (requires `title` in JSON body)
 - `PUT /notes/<id>` - Update a note
 - `DELETE /notes/<id>` - Delete a note
+- `POST /test-results` - Save K6 test result (no auth required)
+- `GET /test-results` - Get all test results (no auth required)
+- `GET /test-results/<id>` - Get specific test result (no auth required)
 
 ## Analyzing Performance Test Results
 
@@ -128,9 +131,10 @@ k6-demo/
 ## Deployment on Railway
 
 See `RAILWAY_SETUP.md` for detailed instructions on deploying all services to Railway cloud, including:
-- Setting up volumes for shared results storage
-- Configuring environment variables
+- Configuring MongoDB for results storage
+- Setting environment variables
 - Running tests and viewing results
+- Container auto-shutdown after test completion
 
 ## Environment Variables
 
@@ -141,5 +145,7 @@ See `ENV_VARIABLES.md` for a complete list of environment variables needed for e
 - The notes server automatically handles missing MongoDB collections
 - Basic auth credentials can be configured via environment variables
 - K6 tests include staged load patterns and performance thresholds
-- Results are automatically saved and can be viewed via the results viewer web interface
+- **Test results are stored in MongoDB** (no volumes needed!)
+- K6 container automatically shuts down after test completion (saves costs on Railway)
+- Results viewer reads directly from MongoDB for real-time viewing
 - All components are designed to be simple and maintainable

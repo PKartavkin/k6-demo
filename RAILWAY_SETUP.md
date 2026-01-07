@@ -53,21 +53,19 @@ This guide explains how to deploy and configure all services on Railway.
    - Set root directory to `results-viewer/`
    - Railway will auto-detect the Dockerfile
 
-3. **Add Volume (for persistent storage):**
-   - Go to "Volumes" tab
-   - Click "Add Volume"
-   - Set mount path: `/app/results`
-   - This ensures results persist across deployments
-
-4. **Set Environment Variables (optional):**
+3. **Set Environment Variables:**
    ```
+   MONGO_URL=mongodb+srv://user:pass@cluster.mongodb.net/
+   DB_NAME=notes_db
    PORT=8080
-   RESULTS_DIR=/app/results
    ```
+   - **Important:** Use the same `MONGO_URL` and `DB_NAME` as notes-server
 
-5. **Get the Service URL:**
+4. **Get the Service URL:**
    - Go to "Settings" → "Networking"
    - Copy the generated URL
+
+**Note:** No volumes needed! Results are stored in MongoDB.
 
 ### 4. Deploy K6 Performance Tests
 
@@ -79,24 +77,23 @@ This guide explains how to deploy and configure all services on Railway.
    - Set root directory to `performance-tests/`
    - Railway will auto-detect the Dockerfile
 
-3. **Add Volume (shared with results-viewer):**
-   - Go to "Volumes" tab
-   - Click "Add Volume"
-   - **Important:** Use the SAME volume as results-viewer
-   - Set mount path: `/app/results`
-   - This allows K6 to write results that results-viewer can read
-
-4. **Set Environment Variables:**
+3. **Set Environment Variables:**
    ```
    BASE_URL=https://notes-server-production.up.railway.app
    API_USER=admin
    API_PASSWORD=your_secure_password
-   RESULTS_DIR=/app/results
+   MONGO_URL=https://notes-server-production.up.railway.app
    ```
+   - `BASE_URL`: Your notes-server URL (for running tests)
+   - `MONGO_URL`: Same as BASE_URL (results saved via API)
+   - `API_USER` and `API_PASSWORD`: Should match notes-server
 
-5. **Configure Service:**
-   - Set service to run "on deploy" or manually trigger
-   - K6 tests are typically run on-demand, not continuously
+4. **Configure Service:**
+   - The container will automatically shut down after test completion
+   - To run tests again, simply redeploy the service
+   - No need to configure restart policies
+
+**Note:** No volumes needed! Results are automatically saved to MongoDB via the notes-server API.
 
 ### 5. Running Tests
 
@@ -121,36 +118,15 @@ This guide explains how to deploy and configure all services on Railway.
 
 1. After K6 tests complete, open the `results-viewer` URL in your browser
 2. You'll see a list of all test results with:
-   - Test filename and timestamp
+   - Test ID and timestamp
    - Key metrics (requests, duration, error rate)
    - Links to view full JSON or download
 
-### 7. Volume Sharing (Important!)
-
-**For Railway:**
-- Railway volumes are service-specific by default
-- To share results between K6 and results-viewer, you have two options:
-
-**Option 1: Use Railway's Shared Volumes (if available)**
-- Create a volume in one service
-- Mount it in both services
-
-**Option 2: Use External Storage (Recommended)**
-- Use Railway's built-in storage or external service (S3, etc.)
-- Or use a database to store results
-- Or use Railway's file system (results persist in service)
-
-**Option 3: Simple Approach (Easiest)**
-- Mount volumes separately in each service
-- Use a shared database or external storage
-- Or: results-viewer can poll/read from K6 service's volume via API
-
-### Alternative: Results via API
-
-If volumes don't work well, you can modify the setup to:
-1. K6 saves results to a database (MongoDB)
-2. Results viewer reads from the same database
-3. Or: K6 uploads results to an S3-compatible storage
+**How it works:**
+- K6 tests save results to MongoDB via notes-server API (`/test-results` endpoint)
+- Results viewer reads directly from MongoDB
+- All results are stored in the `k6_results` collection
+- No file system or volumes needed!
 
 ## Environment Variables Summary
 
@@ -167,31 +143,34 @@ API_PASSWORD=password (optional, but recommended to change)
 BASE_URL=*required* (your notes-server URL)
 API_USER=admin (should match notes-server)
 API_PASSWORD=password (should match notes-server)
-RESULTS_DIR=/app/results (optional)
+MONGO_URL=*optional* (defaults to BASE_URL, used for saving results)
 ```
 
 ### Results Viewer
 ```
+MONGO_URL=*required* (same MongoDB as notes-server)
+DB_NAME=notes_db (optional, should match notes-server)
 PORT=8080 (optional, Railway auto-assigns)
-RESULTS_DIR=/app/results (optional)
 ```
 
 ## Troubleshooting
 
 ### Results Not Appearing
 
-1. **Check Volume Mounts:**
-   - Ensure both services have volumes mounted at `/app/results`
-   - Verify they're using the same volume (if shared volumes supported)
+1. **Check MongoDB Connection:**
+   - Verify `MONGO_URL` is correct in results-viewer
+   - Ensure it's the same MongoDB instance as notes-server
+   - Check MongoDB allows connections from Railway IPs
 
 2. **Check K6 Output:**
    - Look at K6 service logs
-   - Verify `RESULTS_DIR` is set correctly
-   - Check if files are being written
+   - Verify it says "✓ Test results saved to MongoDB"
+   - Check if API call to `/test-results` succeeded
 
-3. **Check File Permissions:**
-   - Ensure results directory is writable
-   - Check Railway volume permissions
+3. **Check Notes Server:**
+   - Verify notes-server is running
+   - Test the `/test-results` endpoint manually
+   - Check notes-server logs for errors
 
 ### Connection Issues
 
@@ -224,4 +203,6 @@ After setting up on Railway:
 - K6 tests should run on-demand, not continuously
 - Results viewer can run continuously (low resource usage)
 - Notes server runs continuously (main service)
+
+
 

@@ -28,6 +28,7 @@ export const options = {
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:5000';
 const API_USER = __ENV.API_USER || 'admin';
 const API_PASSWORD = __ENV.API_PASSWORD || 'password';
+const MONGO_URL = __ENV.MONGO_URL || BASE_URL; // Use same URL as notes server
 
 // Create auth header using K6's built-in encoding
 const authHeader = `Basic ${encoding.b64encode(`${API_USER}:${API_PASSWORD}`)}`;
@@ -130,12 +131,41 @@ export default function () {
 }
 
 export function handleSummary(data) {
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const resultsDir = __ENV.RESULTS_DIR || '/app/results';
+  const timestamp = new Date().toISOString();
+  const testId = `test-${timestamp.replace(/[:.]/g, '-')}`;
+  
+  // Save to MongoDB via API
+  const resultPayload = {
+    test_id: testId,
+    timestamp: timestamp,
+    metrics: data.metrics || {},
+    full_results: data,
+    summary: {
+      iterations: data.metrics?.iterations?.values?.count || 0,
+      http_reqs: data.metrics?.http_reqs?.values?.count || 0,
+      avg_duration: data.metrics?.http_req_duration?.values?.avg || 0,
+      p95_duration: data.metrics?.http_req_duration?.values?.['p(95)'] || 0,
+      error_rate: (data.metrics?.http_req_failed?.values?.rate || 0) * 100
+    }
+  };
+  
+  // Save to MongoDB via notes-server API
+  const saveResponse = http.post(
+    `${MONGO_URL}/test-results`,
+    JSON.stringify(resultPayload),
+    {
+      headers: { 'Content-Type': 'application/json' }
+    }
+  );
+  
+  if (saveResponse.status === 201) {
+    console.log(`✓ Test results saved to MongoDB with ID: ${testId}`);
+  } else {
+    console.error(`✗ Failed to save results: ${saveResponse.status} - ${saveResponse.body}`);
+  }
   
   return {
     'stdout': textSummary(data, { indent: ' ', enableColors: true }),
-    [`${resultsDir}/summary-${timestamp}.json`]: JSON.stringify(data),
   };
 }
 

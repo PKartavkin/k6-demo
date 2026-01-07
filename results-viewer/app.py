@@ -1,16 +1,43 @@
-from flask import Flask, render_template_string, jsonify, send_from_directory
+from flask import Flask, render_template_string, jsonify
+from pymongo import MongoClient
+from pymongo.errors import PyMongoError
 import os
 import json
 from datetime import datetime
-import glob
+from bson import ObjectId
+from bson.errors import InvalidId
 
 app = Flask(__name__)
 
-RESULTS_DIR = os.getenv('RESULTS_DIR', '/app/results')
+# MongoDB connection for test results
+MONGO_URL = os.getenv('MONGO_URL', 'mongodb://localhost:27017/')
+DB_NAME = os.getenv('DB_NAME', 'notes_db')
+RESULTS_COLLECTION_NAME = 'k6_results'
 PORT = int(os.getenv('PORT', 8080))
 
-# Ensure results directory exists
-os.makedirs(RESULTS_DIR, exist_ok=True)
+# Connect to MongoDB
+try:
+    client = MongoClient(MONGO_URL)
+    db = client[DB_NAME]
+    results_collection = db[RESULTS_COLLECTION_NAME]
+    # Create index if it doesn't exist
+    results_collection.create_index('timestamp', background=True)
+except PyMongoError as e:
+    print(f"Warning: Could not connect to MongoDB: {e}")
+    results_collection = None
+
+def get_results_collection():
+    """Get or create the results collection"""
+    global results_collection
+    if results_collection is None:
+        try:
+            client = MongoClient(MONGO_URL)
+            db = client[DB_NAME]
+            results_collection = db[RESULTS_COLLECTION_NAME]
+            results_collection.create_index('timestamp', background=True)
+        except PyMongoError as e:
+            raise Exception(f"Database connection failed: {e}")
+    return results_collection
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -153,8 +180,8 @@ HTML_TEMPLATE = """
                         <div class="file-date">{{ result.date }}</div>
                     </div>
                     <div class="file-actions">
-                        <a href="/view/{{ result.filename }}" class="btn btn-primary">View Details</a>
-                        <a href="/download/{{ result.filename }}" class="btn btn-success">Download JSON</a>
+                        <a href="/view/{{ result.id }}" class="btn btn-primary">View Details</a>
+                        <a href="/download/{{ result.id }}" class="btn btn-success">Download JSON</a>
                     </div>
                 </div>
                 {% if result.metrics %}
@@ -262,11 +289,20 @@ DETAIL_TEMPLATE = """
 </html>
 """
 
-def extract_metrics(data):
-    """Extract key metrics from K6 results"""
+def extract_metrics(result_doc):
+    """Extract key metrics from test result document"""
     metrics = {}
-    if 'metrics' in data:
-        m = data['metrics']
+    
+    # Try to get from summary first (pre-computed)
+    if 'summary' in result_doc:
+        summary = result_doc['summary']
+        metrics['http_reqs'] = summary.get('http_reqs', 0)
+        metrics['avg_duration'] = int(summary.get('avg_duration', 0))
+        metrics['p95_duration'] = int(summary.get('p95_duration', 0))
+        metrics['error_rate'] = f"{summary.get('error_rate', 0):.2f}"
+    # Fallback to extracting from metrics
+    elif 'metrics' in result_doc:
+        m = result_doc['metrics']
         if 'http_reqs' in m and 'values' in m['http_reqs']:
             metrics['http_reqs'] = int(m['http_reqs']['values'].get('count', 0))
         if 'http_req_duration' in m and 'values' in m['http_req_duration']:
@@ -276,84 +312,124 @@ def extract_metrics(data):
         if 'http_req_failed' in m and 'values' in m['http_req_failed']:
             rate = m['http_req_failed']['values'].get('rate', 0) * 100
             metrics['error_rate'] = f"{rate:.2f}"
+    
     return metrics
 
 @app.route('/')
 def index():
-    """List all test results"""
-    results = []
-    json_files = glob.glob(os.path.join(RESULTS_DIR, '*.json'))
-    
-    for filepath in sorted(json_files, key=os.path.getmtime, reverse=True):
-        filename = os.path.basename(filepath)
-        try:
-            mtime = os.path.getmtime(filepath)
-            date_str = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')
+    """List all test results from MongoDB"""
+    try:
+        collection = get_results_collection()
+        # Get latest 100 results, sorted by timestamp
+        db_results = list(collection.find().sort('timestamp', -1).limit(100))
+        
+        results = []
+        for result in db_results:
+            result_id = str(result['_id'])
+            test_id = result.get('test_id', result_id)
+            timestamp = result.get('timestamp', datetime.utcnow())
             
-            # Try to extract metrics
-            metrics = {}
-            try:
-                with open(filepath, 'r') as f:
-                    data = json.load(f)
-                    metrics = extract_metrics(data)
-            except:
-                pass
+            # Format date
+            if isinstance(timestamp, datetime):
+                date_str = timestamp.strftime('%Y-%m-%d %H:%M:%S')
+            else:
+                date_str = str(timestamp)
+            
+            # Extract metrics
+            metrics = extract_metrics(result)
             
             results.append({
-                'filename': filename,
+                'id': result_id,
+                'filename': test_id,
                 'date': date_str,
                 'metrics': metrics if metrics else None
             })
-        except Exception as e:
-            results.append({
-                'filename': filename,
-                'date': 'Unknown',
-                'metrics': None
-            })
-    
-    return render_template_string(HTML_TEMPLATE, results=results)
-
-@app.route('/view/<filename>')
-def view_result(filename):
-    """View detailed JSON result"""
-    filepath = os.path.join(RESULTS_DIR, filename)
-    if not os.path.exists(filepath) or not filename.endswith('.json'):
-        return "File not found", 404
-    
-    try:
-        with open(filepath, 'r') as f:
-            data = json.load(f)
-            json_str = json.dumps(data, indent=2)
-            return render_template_string(DETAIL_TEMPLATE, filename=filename, json_data=json_str)
+        
+        return render_template_string(HTML_TEMPLATE, results=results)
     except Exception as e:
-        return f"Error reading file: {str(e)}", 500
+        return f"Error loading results: {str(e)}", 500
 
-@app.route('/download/<filename>')
-def download_result(filename):
-    """Download JSON result file"""
-    filepath = os.path.join(RESULTS_DIR, filename)
-    if not os.path.exists(filepath) or not filename.endswith('.json'):
-        return "File not found", 404
-    
-    return send_from_directory(RESULTS_DIR, filename, as_attachment=True)
+@app.route('/view/<result_id>')
+def view_result(result_id):
+    """View detailed JSON result from MongoDB"""
+    try:
+        collection = get_results_collection()
+        try:
+            result = collection.find_one({'_id': ObjectId(result_id)})
+        except InvalidId:
+            return "Invalid result ID", 400
+        
+        if not result:
+            return "Result not found", 404
+        
+        # Convert ObjectId to string for JSON serialization
+        result['_id'] = str(result['_id'])
+        
+        # Get test_id or use _id as filename
+        filename = result.get('test_id', result_id)
+        
+        json_str = json.dumps(result, indent=2, default=str)
+        return render_template_string(DETAIL_TEMPLATE, filename=filename, json_data=json_str)
+    except Exception as e:
+        return f"Error reading result: {str(e)}", 500
+
+@app.route('/download/<result_id>')
+def download_result(result_id):
+    """Download JSON result from MongoDB"""
+    try:
+        collection = get_results_collection()
+        try:
+            result = collection.find_one({'_id': ObjectId(result_id)})
+        except InvalidId:
+            return "Invalid result ID", 400
+        
+        if not result:
+            return "Result not found", 404
+        
+        # Convert ObjectId to string
+        result['_id'] = str(result['_id'])
+        
+        # Get test_id for filename
+        filename = result.get('test_id', result_id)
+        if not filename.endswith('.json'):
+            filename += '.json'
+        
+        from flask import Response
+        json_str = json.dumps(result, indent=2, default=str)
+        return Response(
+            json_str,
+            mimetype='application/json',
+            headers={'Content-Disposition': f'attachment; filename={filename}.json'}
+        )
+    except Exception as e:
+        return f"Error downloading result: {str(e)}", 500
 
 @app.route('/api/results')
 def api_results():
-    """API endpoint to get list of results"""
-    results = []
-    json_files = glob.glob(os.path.join(RESULTS_DIR, '*.json'))
-    
-    for filepath in sorted(json_files, key=os.path.getmtime, reverse=True):
-        filename = os.path.basename(filepath)
-        mtime = os.path.getmtime(filepath)
-        results.append({
-            'filename': filename,
-            'date': datetime.fromtimestamp(mtime).isoformat(),
-            'size': os.path.getsize(filepath)
-        })
-    
-    return jsonify(results)
+    """API endpoint to get list of results from MongoDB"""
+    try:
+        collection = get_results_collection()
+        db_results = list(collection.find().sort('timestamp', -1).limit(100))
+        
+        results = []
+        for result in db_results:
+            result_id = str(result['_id'])
+            test_id = result.get('test_id', result_id)
+            timestamp = result.get('timestamp', datetime.utcnow())
+            
+            results.append({
+                'id': result_id,
+                'filename': test_id,
+                'date': timestamp.isoformat() if isinstance(timestamp, datetime) else str(timestamp),
+                'size': len(json.dumps(result, default=str))
+            })
+        
+        return jsonify(results)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=PORT, debug=False)
+
+
 

@@ -14,6 +14,7 @@ auth = HTTPBasicAuth()
 MONGO_URL = os.getenv('MONGO_URL', 'mongodb://localhost:27017/')
 DB_NAME = os.getenv('DB_NAME', 'notes_db')
 COLLECTION_NAME = 'notes'
+RESULTS_COLLECTION_NAME = 'k6_results'
 
 try:
     client = MongoClient(MONGO_URL)
@@ -48,6 +49,18 @@ def get_collection():
         except PyMongoError as e:
             raise Exception(f"Database connection failed: {e}")
     return notes_collection
+
+def get_results_collection():
+    """Get or create the test results collection"""
+    try:
+        client = MongoClient(MONGO_URL)
+        db = client[DB_NAME]
+        results_collection = db[RESULTS_COLLECTION_NAME]
+        # Create index on timestamp for faster queries
+        results_collection.create_index('timestamp', background=True)
+        return results_collection
+    except PyMongoError as e:
+        raise Exception(f"Database connection failed: {e}")
 
 @app.route('/health', methods=['GET'])
 def health():
@@ -168,6 +181,72 @@ def delete_note(note_id):
             return jsonify({'error': 'Note not found'}), 404
         
         return jsonify({'message': 'Note deleted successfully'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# Test Results Endpoints (no auth required for simplicity, or add auth if needed)
+@app.route('/test-results', methods=['POST'])
+def save_test_result():
+    """Save K6 test result to MongoDB"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Request body is required'}), 400
+        
+        collection = get_results_collection()
+        
+        # Create result document
+        result_doc = {
+            'test_id': data.get('test_id', f"test-{datetime.utcnow().isoformat()}"),
+            'timestamp': datetime.utcnow(),
+            'metrics': data.get('metrics', {}),
+            'full_results': data.get('full_results', data),  # Store entire result
+            'summary': data.get('summary', {})
+        }
+        
+        # Insert into MongoDB
+        result = collection.insert_one(result_doc)
+        result_doc['id'] = str(result.inserted_id)
+        del result_doc['_id']
+        
+        return jsonify(result_doc), 201
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/test-results', methods=['GET'])
+def get_test_results():
+    """Get all test results (sorted by timestamp, newest first)"""
+    try:
+        collection = get_results_collection()
+        limit = int(request.args.get('limit', 100))
+        
+        results = list(collection.find().sort('timestamp', -1).limit(limit))
+        
+        for result in results:
+            result['id'] = str(result['_id'])
+            del result['_id']
+        
+        return jsonify(results), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/test-results/<result_id>', methods=['GET'])
+def get_test_result(result_id):
+    """Get a specific test result by ID"""
+    try:
+        collection = get_results_collection()
+        try:
+            result = collection.find_one({'_id': ObjectId(result_id)})
+        except InvalidId:
+            return jsonify({'error': 'Invalid result ID'}), 400
+        
+        if not result:
+            return jsonify({'error': 'Result not found'}), 404
+        
+        result['id'] = str(result['_id'])
+        del result['_id']
+        
+        return jsonify(result), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
