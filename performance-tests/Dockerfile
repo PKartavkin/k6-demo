@@ -2,8 +2,8 @@ FROM grafana/k6:latest
 
 WORKDIR /app
 
-# Copy test script
-COPY script.js script.js
+# Copy from subdirectory since Railway builds from repo root
+COPY performance-tests/script.js script.js
 
 # Run test and exit (prevents continuous restart on Railway)
 # This ensures the container shuts down after test completion
