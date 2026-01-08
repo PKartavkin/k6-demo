@@ -62,6 +62,36 @@ def get_results_collection():
     except PyMongoError as e:
         raise Exception(f"Database connection failed: {e}")
 
+def serialize_document(doc):
+    """Convert MongoDB document to JSON-serializable format"""
+    if doc is None:
+        return None
+    
+    if isinstance(doc, dict):
+        result = {}
+        for key, value in doc.items():
+            if key == '_id':
+                result['id'] = str(value)
+            elif isinstance(value, ObjectId):
+                result[key] = str(value)
+            elif isinstance(value, datetime):
+                result[key] = value.isoformat()
+            elif isinstance(value, dict):
+                result[key] = serialize_document(value)
+            elif isinstance(value, list):
+                result[key] = [serialize_document(item) for item in value]
+            else:
+                result[key] = value
+        return result
+    elif isinstance(doc, list):
+        return [serialize_document(item) for item in doc]
+    elif isinstance(doc, ObjectId):
+        return str(doc)
+    elif isinstance(doc, datetime):
+        return doc.isoformat()
+    else:
+        return doc
+
 @app.route('/health', methods=['GET'])
 def health():
     """Health check endpoint (no auth required)"""
@@ -79,10 +109,8 @@ def get_notes():
     try:
         collection = get_collection()
         notes = list(collection.find({}))
-        for note in notes:
-            note['id'] = str(note['_id'])
-            del note['_id']
-        return jsonify(notes), 200
+        serialized_notes = [serialize_document(note) for note in notes]
+        return jsonify(serialized_notes), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -100,9 +128,7 @@ def get_note(note_id):
         if not note:
             return jsonify({'error': 'Note not found'}), 404
         
-        note['id'] = str(note['_id'])
-        del note['_id']
-        return jsonify(note), 200
+        return jsonify(serialize_document(note)), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -125,9 +151,10 @@ def create_note():
         }
         
         result = collection.insert_one(note)
-        note['id'] = str(result.inserted_id)
+        # Fetch the inserted document to get the _id
+        inserted_note = collection.find_one({'_id': result.inserted_id})
         
-        return jsonify(note), 201
+        return jsonify(serialize_document(inserted_note)), 201
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -159,10 +186,8 @@ def update_note(note_id):
             return jsonify({'error': 'Note not found'}), 404
         
         note = collection.find_one({'_id': ObjectId(note_id)})
-        note['id'] = str(note['_id'])
-        del note['_id']
         
-        return jsonify(note), 200
+        return jsonify(serialize_document(note)), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -206,10 +231,10 @@ def save_test_result():
         
         # Insert into MongoDB
         result = collection.insert_one(result_doc)
-        result_doc['id'] = str(result.inserted_id)
-        del result_doc['_id']
+        # Fetch the inserted document to get the _id
+        inserted_doc = collection.find_one({'_id': result.inserted_id})
         
-        return jsonify(result_doc), 201
+        return jsonify(serialize_document(inserted_doc)), 201
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -221,12 +246,9 @@ def get_test_results():
         limit = int(request.args.get('limit', 100))
         
         results = list(collection.find().sort('timestamp', -1).limit(limit))
+        serialized_results = [serialize_document(result) for result in results]
         
-        for result in results:
-            result['id'] = str(result['_id'])
-            del result['_id']
-        
-        return jsonify(results), 200
+        return jsonify(serialized_results), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -243,10 +265,7 @@ def get_test_result(result_id):
         if not result:
             return jsonify({'error': 'Result not found'}), 404
         
-        result['id'] = str(result['_id'])
-        del result['_id']
-        
-        return jsonify(result), 200
+        return jsonify(serialize_document(result)), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
