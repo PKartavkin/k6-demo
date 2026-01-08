@@ -3,12 +3,24 @@ from flask_httpauth import HTTPBasicAuth
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 import os
+import json
 from bson import ObjectId
 from bson.errors import InvalidId
 from datetime import datetime
 
 app = Flask(__name__)
 auth = HTTPBasicAuth()
+
+# Custom JSON encoder to handle ObjectId and datetime
+class JSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, ObjectId):
+            return str(obj)
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return super().default(obj)
+
+app.json_encoder = JSONEncoder
 
 # MongoDB connection
 MONGO_URL = os.getenv('MONGO_URL', 'mongodb://localhost:27017/')
