@@ -1,14 +1,13 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
-import { Rate, Trend, Counter } from 'k6/metrics';
-import encoding from 'k6/encoding';
+import { textSummary } from 'https://jslib.k6.io/k6-summary/0.0.1/index.js';
 
-// Custom metrics
-const errorRate = new Rate('errors');
-const requestDuration = new Trend('request_duration');
-const requestCount = new Counter('requests');
+// Configuration
+const BASE_URL = __ENV.BASE_URL || 'http://localhost:5000';
+const API_USER = __ENV.API_USER || 'admin';
+const API_PASSWORD = __ENV.API_PASSWORD || 'password';
+const THINK_TIME = parseFloat(__ENV.THINK_TIME || '1');
 
-// Test configuration
 export const options = {
   stages: [
     { duration: '30s', target: 10 },  // Ramp up to 10 users
@@ -20,121 +19,122 @@ export const options = {
   thresholds: {
     http_req_duration: ['p(95)<500', 'p(99)<1000'], // 95% of requests should be below 500ms, 99% below 1000ms
     http_req_failed: ['rate<0.01'], // Error rate should be less than 1%
-    errors: ['rate<0.01'],
   },
 };
 
-// Base URL and credentials
-const BASE_URL = __ENV.BASE_URL || 'http://localhost:5000';
-const API_USER = __ENV.API_USER || 'admin';
-const API_PASSWORD = __ENV.API_PASSWORD || 'password';
-// Note: MONGO_URL is only used by the notes-server, not by this test script
-
-// Create auth header using K6's built-in encoding
-const authHeader = `Basic ${encoding.b64encode(`${API_USER}:${API_PASSWORD}`)}`;
-
-// Common request params with auth
+// Auth setup
 const authParams = {
   headers: {
     'Content-Type': 'application/json',
-    'Authorization': authHeader,
+    'Authorization': `Basic ${btoa(`${API_USER}:${API_PASSWORD}`)}`,
   },
 };
 
-// Simplified authenticated request helper
-function authenticatedRequest(method, url, payload = null) {
-  const params = { ...authParams };
-  let response;
-  
-  if (payload) {
-    response = http.request(method, url, JSON.stringify(payload), params);
-  } else {
-    response = http.request(method, url, null, params);
+// Helper functions
+function parseBody(response) {
+  try {
+    return JSON.parse(response.body);
+  } catch {
+    return null;
   }
-  
-  requestCount.add(1);
-  requestDuration.add(response.timings.duration);
-  errorRate.add(response.status >= 400);
-  
-  return response;
 }
 
-export default function () {
-  // Create a new note
-  const createPayload = {
+function createNote() {
+  const payload = {
     title: `Note ${__VU}-${__ITER}`,
     content: `This is test note content created by virtual user ${__VU} in iteration ${__ITER}`,
   };
   
-  const createResponse = authenticatedRequest('POST', `${BASE_URL}/notes`, createPayload);
-  const createCheck = check(createResponse, {
-    'create note status is 201': (r) => r.status === 201,
-    'create note has id': (r) => {
-      const body = JSON.parse(r.body);
-      return body.id !== undefined;
-    },
-  });
+  const res = http.post(`${BASE_URL}/notes`, JSON.stringify(payload), { params: authParams });
+  const body = parseBody(res);
   
-  if (!createCheck) {
-    console.error(`Failed to create note: ${createResponse.status} - ${createResponse.body}`);
-    sleep(1);
-    return;
+  if (!check(res, {
+    'create note status is 201': (r) => r.status === 201,
+    'create note has id': () => body?.id !== undefined,
+  })) {
+    console.error(`Failed to create note: ${res.status} - ${res.body}`);
+    return null;
   }
   
-  const noteId = JSON.parse(createResponse.body).id;
-  sleep(1);
+  return body.id;
+}
+
+function getNote(noteId) {
+  const res = http.get(`${BASE_URL}/notes/${noteId}`, { params: authParams });
+  const body = parseBody(res);
   
-  // Get the created note
-  const getResponse = authenticatedRequest('GET', `${BASE_URL}/notes/${noteId}`);
-  check(getResponse, {
+  check(res, {
     'get note status is 200': (r) => r.status === 200,
-    'get note has correct id': (r) => {
-      const body = JSON.parse(r.body);
-      return body.id === noteId;
-    },
+    'get note has correct id': () => body?.id === noteId,
   });
-  sleep(1);
-  
-  // Update the note
-  const updatePayload = {
+}
+
+function updateNote(noteId) {
+  const payload = {
     title: `Updated Note ${__VU}-${__ITER}`,
     content: `Updated content for note ${noteId}`,
   };
   
-  const updateResponse = authenticatedRequest('PUT', `${BASE_URL}/notes/${noteId}`, updatePayload);
-  check(updateResponse, {
+  const res = http.put(`${BASE_URL}/notes/${noteId}`, JSON.stringify(payload), { params: authParams });
+  const body = parseBody(res);
+  
+  check(res, {
     'update note status is 200': (r) => r.status === 200,
-    'update note has updated title': (r) => {
-      const body = JSON.parse(r.body);
-      return body.title === updatePayload.title;
-    },
+    'update note has updated title': () => body?.title === payload.title,
   });
-  sleep(1);
-  
-  // Get all notes (list endpoint)
-  const listResponse = authenticatedRequest('GET', `${BASE_URL}/notes`);
-  check(listResponse, {
-    'list notes status is 200': (r) => r.status === 200,
-    'list notes returns array': (r) => {
-      const body = JSON.parse(r.body);
-      return Array.isArray(body);
-    },
-  });
-  sleep(1);
-  
-  // Delete the note
-  const deleteResponse = authenticatedRequest('DELETE', `${BASE_URL}/notes/${noteId}`);
-  check(deleteResponse, {
-    'delete note status is 200': (r) => deleteResponse.status === 200,
-  });
-  sleep(1);
 }
 
+function listNotes() {
+  const res = http.get(`${BASE_URL}/notes`, { params: authParams });
+  const body = parseBody(res);
+  
+  check(res, {
+    'list notes status is 200': (r) => r.status === 200,
+    'list notes returns array': () => Array.isArray(body),
+  });
+}
+
+function deleteNote(noteId) {
+  const res = http.del(`${BASE_URL}/notes/${noteId}`, null, { params: authParams });
+  check(res, {
+    'delete note status is 200': (r) => r.status === 200,
+  });
+}
+
+// Main test function
+export default function () {
+  // Create a new note
+  const noteId = createNote();
+  if (!noteId) {
+    sleep(THINK_TIME);
+    return;
+  }
+  
+  sleep(THINK_TIME);
+  
+  // Get the created note
+  getNote(noteId);
+  sleep(THINK_TIME);
+  
+  // Update the note
+  updateNote(noteId);
+  sleep(THINK_TIME);
+  
+  // Get all notes (list endpoint)
+  listNotes();
+  sleep(THINK_TIME);
+  
+  // Delete the note
+  deleteNote(noteId);
+  sleep(THINK_TIME);
+}
+
+// Results handler
 export function handleSummary(data) {
   const timestamp = new Date().toISOString();
   const testId = `test-${timestamp.replace(/[:.]/g, '-')}`;
   
-  // Save to MongoDB via API
+  // Prepare summary payload
   const resultPayload = {
     test_id: testId,
     timestamp: timestamp,
@@ -145,8 +145,8 @@ export function handleSummary(data) {
       http_reqs: data.metrics?.http_reqs?.values?.count || 0,
       avg_duration: data.metrics?.http_req_duration?.values?.avg || 0,
       p95_duration: data.metrics?.http_req_duration?.values?.['p(95)'] || 0,
-      error_rate: (data.metrics?.http_req_failed?.values?.rate || 0) * 100
-    }
+      error_rate: (data.metrics?.http_req_failed?.values?.rate || 0) * 100,
+    },
   };
   
   // Save to MongoDB via notes-server API
@@ -154,7 +154,7 @@ export function handleSummary(data) {
     `${BASE_URL}/test-results`,
     JSON.stringify(resultPayload),
     {
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json' },
     }
   );
   
@@ -165,35 +165,6 @@ export function handleSummary(data) {
   }
   
   return {
-    'stdout': textSummary(data, { indent: ' ', enableColors: true }),
+    stdout: textSummary(data, { enableColors: true }),
   };
 }
-
-function textSummary(data, options = {}) {
-  const indent = options.indent || '';
-  const enableColors = options.enableColors || false;
-  
-  let summary = '\n';
-  summary += `${indent}✓ Test completed\n\n`;
-  summary += `${indent}Scenarios:\n`;
-  summary += `${indent}  ✓ default: ${data.metrics.iterations.values.count} iterations\n\n`;
-  
-  summary += `${indent}HTTP Metrics:\n`;
-  if (data.metrics.http_req_duration) {
-    summary += `${indent}  http_req_duration: avg=${data.metrics.http_req_duration.values.avg.toFixed(2)}ms, min=${data.metrics.http_req_duration.values.min.toFixed(2)}ms, max=${data.metrics.http_req_duration.values.max.toFixed(2)}ms\n`;
-  }
-  if (data.metrics.http_req_failed) {
-    summary += `${indent}  http_req_failed: ${(data.metrics.http_req_failed.values.rate * 100).toFixed(2)}%\n`;
-  }
-  
-  summary += `\n${indent}Custom Metrics:\n`;
-  if (data.metrics.errors) {
-    summary += `${indent}  errors: ${(data.metrics.errors.values.rate * 100).toFixed(2)}%\n`;
-  }
-  if (data.metrics.requests) {
-    summary += `${indent}  requests: ${data.metrics.requests.values.count}\n`;
-  }
-  
-  return summary;
-}
-
