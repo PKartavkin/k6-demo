@@ -4,6 +4,8 @@ WORKDIR /app
 
 # Copy from subdirectory since Railway builds from repo root
 COPY performance-tests/script.js script.js
+COPY performance-tests/notes-api-client.js notes-api-client.js
+COPY performance-tests/utils.js utils.js
 
 # Run test - container will exit after completion (prevents continuous restart on Railway)
 CMD ["run", "script.js"]
