@@ -1,5 +1,6 @@
 import http from 'k6/http';
 import { check } from 'k6';
+import encoding from 'k6/encoding';
 import { parseBody } from './utils.js';
 
 /**
@@ -12,7 +13,7 @@ export class NotesApiClient {
     this.authParams = {
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Basic ${btoa(`${username}:${password}`)}`,
+        'Authorization': `Basic ${encoding.b64encode(`${username}:${password}`)}`,
       },
     };
   }

@@ -11,11 +11,11 @@ const THINK_TIME = parseFloat(__ENV.THINK_TIME || '1');
 
 export const options = {
   stages: [
-    { duration: '5s', target: 10 },  // Ramp up to 10 users
-    { duration: '15s', target: 10 },   // Stay at 10 users
-    { duration: '5s', target: 20 },  // Ramp up to 20 users
-    { duration: '15s', target: 20 },   // Stay at 20 users
-    { duration: '5s', target: 0 },   // Ramp down to 0 users
+    { duration: '2s', target: 10 },  // Ramp up to 10 users
+    { duration: '10s', target: 10 },   // Stay at 10 users
+    { duration: '2s', target: 20 },  // Ramp up to 20 users
+    { duration: '10s', target: 20 },   // Stay at 20 users
+    { duration: '2s', target: 0 },   // Ramp down to 0 users
   ],
   thresholds: {
     http_req_duration: ['p(95)<500', 'p(99)<1000'], // 95% of requests should be below 500ms, 99% below 1000ms
