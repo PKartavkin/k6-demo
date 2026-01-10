@@ -26,7 +26,7 @@ export class NotesApiClient {
    */
   createNote(title, content) {
     const payload = { title, content };
-    const res = http.post(`${this.baseUrl}/notes`, JSON.stringify(payload), { params: this.authParams });
+    const res = http.post(`${this.baseUrl}/notes`, JSON.stringify(payload), this.authParams);
     const body = parseBody(res);
 
     if (!check(res, {
@@ -46,7 +46,7 @@ export class NotesApiClient {
    * @returns {object|null} - Note object if successful, null otherwise
    */
   getNote(noteId) {
-    const res = http.get(`${this.baseUrl}/notes/${noteId}`, { params: this.authParams });
+    const res = http.get(`${this.baseUrl}/notes/${noteId}`, this.authParams);
     const body = parseBody(res);
 
     check(res, {
@@ -66,7 +66,7 @@ export class NotesApiClient {
    */
   updateNote(noteId, title, content) {
     const payload = { title, content };
-    const res = http.put(`${this.baseUrl}/notes/${noteId}`, JSON.stringify(payload), { params: this.authParams });
+    const res = http.put(`${this.baseUrl}/notes/${noteId}`, JSON.stringify(payload), this.authParams);
     const body = parseBody(res);
 
     check(res, {
@@ -82,7 +82,7 @@ export class NotesApiClient {
    * @returns {array} - Array of notes
    */
   listNotes() {
-    const res = http.get(`${this.baseUrl}/notes`, { params: this.authParams });
+    const res = http.get(`${this.baseUrl}/notes`, this.authParams);
     const body = parseBody(res);
 
     check(res, {
@@ -99,7 +99,7 @@ export class NotesApiClient {
    * @returns {boolean} - True if successful, false otherwise
    */
   deleteNote(noteId) {
-    const res = http.del(`${this.baseUrl}/notes/${noteId}`, null, { params: this.authParams });
+    const res = http.del(`${this.baseUrl}/notes/${noteId}`, null, this.authParams);
     
     const success = check(res, {
       'delete note status is 200': (r) => r.status === 200,
