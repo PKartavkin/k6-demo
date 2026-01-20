@@ -14,12 +14,15 @@ ENV INFLUXDB_TOKEN=""
 ENV INFLUXDB_ORG=""
 ENV INFLUXDB_BUCKET=""
 
+# Override entrypoint to use sh for conditional logic
+ENTRYPOINT ["/bin/sh", "-c"]
+
 # Run test with optional InfluxDB output
 # K6's built-in InfluxDB output supports v1 format
 # For InfluxDB v2, we use the v1-compatible endpoint with token in URL
 # Format: influxdb=http://host:port/database?token=xxx
 # If INFLUXDB_URL and INFLUXDB_TOKEN are set, output to InfluxDB; otherwise run normally
-CMD ["sh", "-c", "if [ -n \"$INFLUXDB_URL\" ] && [ -n \"$INFLUXDB_TOKEN\" ]; then k6 run --out \"influxdb=$INFLUXDB_URL?token=$INFLUXDB_TOKEN\" script.js; else k6 run script.js; fi"]
+CMD ["if [ -n \"$INFLUXDB_URL\" ] && [ -n \"$INFLUXDB_TOKEN\" ]; then k6 run --out \"influxdb=$INFLUXDB_URL?token=$INFLUXDB_TOKEN\" script.js; else k6 run script.js; fi"]
 
 
 
