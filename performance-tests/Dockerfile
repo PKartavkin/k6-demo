@@ -1,8 +1,8 @@
 # Build k6 with InfluxDB v2 output extension
-FROM golang:1.21-alpine AS builder
+FROM golang:1.21 AS builder
 
 # Install build dependencies
-RUN apk add --no-cache git build-base
+RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
 # Enable Go modules
 ENV GO111MODULE=on
@@ -24,16 +24,12 @@ RUN /go/bin/xk6 build \
 # Verify k6 binary was created
 RUN test -f /k6 || (echo "k6 build failed" && exit 1)
 
-# Final image
-FROM alpine:latest
-
-RUN apk add --no-cache ca-certificates && \
-    addgroup -S k6 && \
-    adduser -S -G k6 k6
+# Final image - use grafana/k6 as base to ensure compatibility
+FROM grafana/k6:latest
 
 WORKDIR /app
 
-# Copy custom k6 binary from builder
+# Copy custom k6 binary from builder (overrides the base image's k6)
 COPY --from=builder /k6 /usr/bin/k6
 
 # Make k6 executable
