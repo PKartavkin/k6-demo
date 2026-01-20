@@ -1,20 +1,29 @@
 # Build k6 with InfluxDB v2 output extension
 FROM golang:1.21-alpine AS builder
 
-# Install build dependencies (build-base is needed for compilation)
+# Install build dependencies
 RUN apk add --no-cache git build-base
 
-# Set up Go environment and ensure xk6 is in PATH
-ENV GOPATH=/go
-ENV PATH=$PATH:$GOPATH/bin
+# Enable Go modules
+ENV GO111MODULE=on
 
-# Install xk6 tool
-RUN go install go.k6.io/xk6/cmd/xk6@latest
+# Set working directory
+WORKDIR /tmp
 
-# Verify xk6 is accessible and build k6 with InfluxDB v2 extension
-RUN $GOPATH/bin/xk6 build \
+# Install xk6 tool - use go get first to ensure module is downloaded
+RUN go get -d go.k6.io/xk6/cmd/xk6@latest && \
+    go install go.k6.io/xk6/cmd/xk6@latest
+
+# Verify xk6 was installed
+RUN test -f /go/bin/xk6 || (echo "xk6 installation failed" && exit 1)
+
+# Build k6 with InfluxDB v2 extension
+RUN /go/bin/xk6 build \
     --with github.com/grafana/xk6-output-influxdb@latest \
     --output /k6
+
+# Verify k6 binary was created
+RUN test -f /k6 || (echo "k6 build failed" && exit 1)
 
 # Final image
 FROM alpine:latest
