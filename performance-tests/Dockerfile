@@ -10,9 +10,8 @@ ENV GO111MODULE=on
 # Set working directory
 WORKDIR /tmp
 
-# Install xk6 tool - use go get first to ensure module is downloaded
-RUN go get -d go.k6.io/xk6/cmd/xk6@latest && \
-    go install go.k6.io/xk6/cmd/xk6@latest
+# Install xk6 tool
+RUN go install go.k6.io/xk6/cmd/xk6@latest
 
 # Verify xk6 was installed
 RUN test -f /go/bin/xk6 || (echo "xk6 installation failed" && exit 1)
