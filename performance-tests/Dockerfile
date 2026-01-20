@@ -1,10 +1,20 @@
 # Build k6 with InfluxDB v2 output extension
 FROM golang:1.21-alpine AS builder
 
-# Install xk6 and build k6 with InfluxDB v2 extension
-RUN apk add --no-cache git
+# Install build dependencies (build-base is needed for compilation)
+RUN apk add --no-cache git build-base
+
+# Set up Go environment and ensure xk6 is in PATH
+ENV GOPATH=/go
+ENV PATH=$PATH:$GOPATH/bin
+
+# Install xk6 tool
 RUN go install go.k6.io/xk6/cmd/xk6@latest
-RUN xk6 build --with github.com/grafana/xk6-output-influxdb@latest --output /k6
+
+# Verify xk6 is accessible and build k6 with InfluxDB v2 extension
+RUN $GOPATH/bin/xk6 build \
+    --with github.com/grafana/xk6-output-influxdb@latest \
+    --output /k6
 
 # Final image
 FROM alpine:latest
@@ -17,6 +27,9 @@ WORKDIR /app
 
 # Copy custom k6 binary from builder
 COPY --from=builder /k6 /usr/bin/k6
+
+# Make k6 executable
+RUN chmod +x /usr/bin/k6
 
 # Copy from subdirectory since Railway builds from repo root
 COPY performance-tests/script.js script.js
