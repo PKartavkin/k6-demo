@@ -56,40 +56,9 @@ export default function () {
 }
 
 // Results handler
+// Note: Test results are now written to InfluxDB via K6's built-in output
+// MongoDB is no longer used for storing test results
 export function handleSummary(data) {
-  const timestamp = new Date().toISOString();
-  const testId = `test-${timestamp.replace(/[:.]/g, '-')}`;
-
-  // Prepare summary payload
-  const resultPayload = {
-    test_id: testId,
-    timestamp: timestamp,
-    metrics: data.metrics || {},
-    full_results: data,
-    summary: {
-      iterations: data.metrics?.iterations?.values?.count || 0,
-      http_reqs: data.metrics?.http_reqs?.values?.count || 0,
-      avg_duration: data.metrics?.http_req_duration?.values?.avg || 0,
-      p95_duration: data.metrics?.http_req_duration?.values?.['p(95)'] || 0,
-      error_rate: (data.metrics?.http_req_failed?.values?.rate || 0) * 100,
-    },
-  };
-
-  // Save to MongoDB via notes-server API
-  const saveResponse = http.post(
-    `${BASE_URL}/test-results`,
-    JSON.stringify(resultPayload),
-    {
-      headers: { 'Content-Type': 'application/json' },
-    }
-  );
-
-  if (saveResponse.status === 201) {
-    console.log(`✓ Test results saved to MongoDB with ID: ${testId}`);
-  } else {
-    console.error(`✗ Failed to save results: ${saveResponse.status} - ${saveResponse.body}`);
-  }
-
   return {
     stdout: textSummary(data, { enableColors: true }),
   };
